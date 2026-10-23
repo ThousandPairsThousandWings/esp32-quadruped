@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Otto 四足机器人控制台</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            max-width: 100%;
+            padding: 50px;
+        }
+        .left {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            max-width: 100%;
+            margin: 30px;
+        }
+        .right {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+            margin: 30px;
+        }
+        .middle-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+        .button {
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+            margin: 5px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-radius: 10px;
+            cursor: pointer;
+        }
+        .left .button {
+            width: 150px;
+            height: 150px;
+            font-size: 60px;
+        }
+        .right .button {
+            width: 220px;
+            height: 100px;
+            font-size: 26px;
+        }
+        .radar-section {
+            width: 90%;
+            max-width: 820px;
+            margin: 10px auto 50px auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: Consolas, monospace;
+        }
+        .radar-head {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-sizing: border-box;
+            padding: 12px 16px;
+            color: #cfd8e3;
+            background: #0d1b2a;
+            border-radius: 10px 10px 0 0;
+            font-size: 15px;
+        }
+        #radar-info {
+            color: #7fd1ff;
+        }
+        #radar {
+            width: 100%;
+            height: auto;
+            display: block;
+            background: #0d1b2a;
+            border-radius: 0 0 10px 10px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 方向控制 -->
+    <div class="container">
+        <div class="left">
+            <div class="button" id="forward">▴</div>
+            <div class="middle-row">
+                <div class="button" id="turn_L">◂</div>
+                <div class="button" id="home">●</div>
+                <div class="button" id="turn_R">▸</div>
+            </div>
+            <div class="button" id="backward">▾</div>
+        </div>
+
+        <!-- 动作按钮 -->
+        <div class="right">
+            <div class="button" id="hello">Hello</div>
+            <div class="button" id="omni_walk">OmniWalk</div>
+            <div class="button" id="moonwalk_L">Moonwalk</div>
+            <div class="button" id="dance">Dance</div>
+            <div class="button" id="up_down">UpDown</div>
+            <div class="button" id="push_up">PushUp</div>
+            <div class="button" id="front_back">FrontBack</div>
+            <div class="button" id="wave_hand">WaveHand</div>
+            <div class="button" id="hide">Hide</div>
+            <div class="button" id="scared">Scared</div>
+        </div>
+    </div>
+
+    <!-- 超声波平面图 -->
+    <div class="radar-section">
+        <div class="radar-head">
+            <span>超声波平面图（红点 = 障碍物）</span>
+            <span id="radar-info">等待数据…</span>
+        </div>
+        <canvas id="radar" width="760" height="380">
+            当前浏览器不支持 Canvas。
+        </canvas>
+    </div>
+
+    <script>
+        // ---------- 动作控制 ----------
+        const CONTROL_URL = '/control';
+
+        function sendCommand(command) {
+            fetch(CONTROL_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ command: command })
+            })
+                .then((response) => response.json())
+                .then((data) => console.log(data))
+                .catch((error) => console.error('控制命令失败:', error));
+        }
+
+        document.querySelectorAll('.button').forEach((button) => {
+            button.addEventListener('click', () => sendCommand(button.id));
+        });
+
+        // ---------- 超声波平面图 ----------
+        const SCAN_URL = '/scan';
+        const SCAN_POLL_MS = 400;
+        const BOTTOM_MARGIN = 32;
+
+        const canvas = document.getElementById('radar');
+        const ctx = canvas.getContext('2d');
+        const info = document.getElementById('radar-info');
+        let maxRangeCm = 200;
+
+        // 角度 0~180 映射为 -90°（左）~ +90°（右），distance 映射为半径
+        function toCanvasXY(angle, distance) {
+            const width = canvas.width;
+            const height = canvas.height;
+            const cx = width / 2;
+            const cy = height - BOTTOM_MARGIN;
+            const radius = Math.min(width / 2 - 40, height - 80);
+            const bearing = (angle - 90) * Math.PI / 180;
+            const r = Math.min(distance, maxRangeCm) / maxRangeCm * radius;
+            return [cx + r * Math.sin(bearing), cy - r * Math.cos(bearing)];
+        }
+
+        function drawRadar(points, angle, distance) {
+            const width = canvas.width;
+            const height = canvas.height;
+            const cx = width / 2;
+            const cy = height - BOTTOM_MARGIN;
+            const radius = Math.min(width / 2 - 40, height - 80);
+
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = '#0d1b2a';
+            ctx.fillRect(0, 0, width, height);
+
+            // 距离圈
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = 'rgba(120, 170, 220, 0.25)';
+            ctx.fillStyle = 'rgba(160, 190, 220, 0.6)';
+            ctx.font = '12px Consolas, monospace';
+            for (let cm = 50; cm <= maxRangeCm; cm += 50) {
+                const r = cm / maxRangeCm * radius;
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, Math.PI, 2 * Math.PI);
+                ctx.stroke();
+                ctx.fillText(cm + 'cm', cx + 6, cy - r - 4);
+            }
+
+            // 角度射线
+            for (let a = 0; a <= 180; a += 30) {
+                const [x, y] = toCanvasXY(a, maxRangeCm);
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+            }
+
+            // 当前探测方向
+            if (angle !== null && angle !== undefined) {
+                const [x, y] = toCanvasXY(angle, distance || maxRangeCm);
+                ctx.strokeStyle = 'rgba(80, 220, 140, 0.8)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+            }
+
+            // 障碍物红点
+            ctx.fillStyle = '#ff3b30';
+            ctx.shadowColor = 'rgba(255, 59, 48, 0.9)';
+            ctx.shadowBlur = 10;
+            for (const [pointAngle, pointDistance] of points) {
+                if (pointDistance === null || pointDistance === undefined) continue;
+                const [x, y] = toCanvasXY(pointAngle, pointDistance);
+                ctx.beginPath();
+                ctx.arc(x, y, 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.shadowBlur = 0;
+
+            // 机器人位置
+            ctx.fillStyle = '#7fd1ff';
+            ctx.fillRect(cx - 12, cy - 2, 24, 12);
+            ctx.fillStyle = '#0d1b2a';
+            ctx.font = 'bold 9px Consolas, monospace';
+            ctx.fillText('BOT', cx - 9, cy + 8);
+        }
+
+        function updateScanInfo(data, points) {
+            const distanceText = (data.distance === null || data.distance === undefined)
+                ? '无回波'
+                : data.distance.toFixed(1) + ' cm';
+            info.textContent = '角度 ' + Math.round(data.angle) + '° · '
+                + distanceText + ' · 障碍点 ' + points.length;
+        }
+
+        async function pollScan() {
+            try {
+                const response = await fetch(SCAN_URL, { cache: 'no-store' });
+                const data = await response.json();
+                if (data.max_cm) maxRangeCm = data.max_cm;
+                const points = data.points || [];
+                drawRadar(points, data.angle, data.distance);
+                updateScanInfo(data, points);
+            } catch (error) {
+                info.textContent = '测距数据获取失败（机器人忙或未连接）';
+            }
+            setTimeout(pollScan, SCAN_POLL_MS);
+        }
+
+        drawRadar([], null, null);
+        pollScan();
+    </script>
+</body>
+</html>
